@@ -1,0 +1,84 @@
+/* Minecraft theme: loaded after style.css so it overrides Bootstrap and the base look. */
+:root {
+  --mc-title: 'Press Start 2P', ui-monospace, Menlo, monospace;
+  --mc-body: 'VT323', ui-monospace, Menlo, monospace;
+  --mc-slot: #8b8b8b; --mc-slot-hi: #a8a8a8;
+  --mc-light: #ffffff; --mc-shade: #373737; --mc-ink: #000;
+  --mc-panel: #3a3a3a; --mc-green: #5f8f3a; --mc-shadow: #3f3f3f;
+  --mc-bevel: inset -3px -3px 0 var(--mc-shade), inset 3px 3px 0 var(--mc-light), 0 0 0 2px var(--mc-ink);
+  --mc-bevel-down: inset 3px 3px 0 var(--mc-shade), inset -3px -3px 0 var(--mc-light), 0 0 0 2px var(--mc-ink);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --mc-slot: #6b6b6b; --mc-slot-hi: #858585; --mc-shade: #1e1e1e; --mc-panel: #2b2b2b; } }
+:root[data-theme="dark"] { --mc-slot: #6b6b6b; --mc-slot-hi: #858585; --mc-shade: #1e1e1e; --mc-panel: #2b2b2b; }
+
+html { background: #78a7ff; font-size: 15px; }
+body { background: transparent !important; font-family: var(--mc-body); font-size: 1.35rem; letter-spacing: .02em; }
+#root { position: relative; z-index: 1; }
+.mc-scene { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; image-rendering: pixelated; }
+.app-shell { background: transparent !important; }
+
+/* Inventory-style panel behind the content so text stays readable over the scene */
+.app-content { background: rgba(0, 0, 0, .5); box-shadow: 0 0 0 3px #000, inset 0 0 0 3px rgba(255, 255, 255, .14); margin-block: 1rem; }
+
+/* Square everything: blocks have no rounded corners */
+[class*="rounded"], .btn, .form-control, .form-select, .search-input, .modal-card, .sticky-note,
+.shortcut-face, .shortcut-add-face, .shortcut-favicon, .shortcut-icon-button, .category-color-dot,
+.palette-swatch, .background-preset, .toast-message, .note-file-row, .page-switcher .nav-link { border-radius: 0 !important; }
+img { image-rendering: pixelated; }
+
+/* Titles and controls use the pixel face; body text uses the readable one */
+h1, h2, h3, h4, h5, h6, .h5, .h6, .btn, .nav-link, .group-action, .form-label, .text-uppercase {
+  font-family: var(--mc-title); letter-spacing: 0; text-shadow: 2px 2px 0 var(--mc-shadow);
+}
+h1, h2, h3, h4, h5, h6, .h5, .h6 { font-weight: 400; line-height: 1.6; }
+h1 { font-size: 1.1rem; } h2, .h5 { font-size: .95rem; } h3, h4, h5, h6, .h6 { font-size: .8rem; }
+.btn, .nav-link, .group-action, .form-label { font-size: .6rem; line-height: 1.5; }
+.small, small { font-size: 1.1rem; }
+.text-white-50, .text-white-75, .text-light { text-shadow: 1px 1px 0 var(--mc-shadow); }
+
+/* Buttons are beveled inventory slots */
+.btn:not(.btn-link) { background: var(--mc-slot); color: #fff; border: 0; box-shadow: var(--mc-bevel); transition: none; }
+.btn:not(.btn-link):hover, .btn:not(.btn-link):focus-visible { background: var(--mc-slot-hi); color: #fff; }
+.btn:not(.btn-link):active { box-shadow: var(--mc-bevel-down); }
+.btn:focus-visible, .search-input:focus-visible, .form-control:focus-visible { outline: 3px solid #ffe14d; outline-offset: 3px; }
+.btn-link { font-family: var(--mc-title); font-size: .6rem; text-decoration: none; text-shadow: 2px 2px 0 var(--mc-shadow); }
+.btn-success, .btn-primary { background: var(--mc-green) !important; }
+.btn-danger, .btn-outline-danger { background: #a83232 !important; }
+.page-switcher .nav-link { background: var(--mc-slot); color: #fff; box-shadow: var(--mc-bevel); border: 0; }
+.page-switcher .nav-link.active { background: var(--mc-green); box-shadow: var(--mc-bevel-down); }
+
+/* Text fields look like the black game text box */
+.form-control, .form-select, .search-input, .app-form-control, .note-content-input, .note-title-input {
+  background: #000 !important; color: #fff !important; border: 3px solid #a0a0a0 !important; box-shadow: none !important; font-family: var(--mc-body); font-size: 1.3rem; animation: none !important;
+}
+.form-control:focus, .search-input:focus, .app-form-control:focus { border-color: #fff !important; }
+.search-input { font-size: 1.5rem; }
+.search-shell:focus-within { transform: none; }
+
+/* Shortcut tiles become slots holding pixel blocks */
+.shortcut-face { box-shadow: inset -5px -5px 0 rgba(0, 0, 0, .35), inset 5px 5px 0 rgba(255, 255, 255, .35), 0 0 0 3px #000; }
+.shortcut-favicon { background: #fff; box-shadow: 0 0 0 2px #000; }
+.shortcut-label { font-family: var(--mc-title); font-size: .5rem; line-height: 1.6; color: #fff; text-shadow: 2px 2px 0 var(--mc-shadow); }
+.shortcut-add-face { border: 3px solid var(--mc-shade) !important; background: rgba(0, 0, 0, .4); box-shadow: inset 3px 3px 0 #000; }
+.shortcut-icon-button { background: var(--mc-slot); border: 0; box-shadow: var(--mc-bevel); }
+.shortcut-remove-button:hover { background: #a83232; }
+.category-color-dot { width: .9rem; height: .9rem; box-shadow: 0 0 0 2px #000; }
+
+/* Dialogs, notes, toasts */
+.modal-backdrop-custom { background: rgba(0, 0, 0, .65) !important; backdrop-filter: none !important; }
+.modal-card { background: var(--mc-panel) !important; border: 0 !important; color: #fff; box-shadow: inset 4px 4px 0 #8b8b8b, inset -4px -4px 0 #111, 0 0 0 3px #000; }
+.sticky-note { box-shadow: inset -4px -4px 0 rgba(0, 0, 0, .25), inset 4px 4px 0 rgba(255, 255, 255, .35), 0 0 0 3px #000 !important; font-family: var(--mc-body); }
+.sticky-note-back { box-shadow: 0 0 0 3px #000; }
+.note-file-row { box-shadow: 0 0 0 2px #000; background: rgba(0, 0, 0, .35); }
+.note-file-row.is-active { background: var(--mc-green); }
+.toast-message { background: var(--mc-panel) !important; color: #fff; box-shadow: var(--mc-bevel); font-family: var(--mc-title); font-size: .6rem; }
+.database-error { font-family: var(--mc-title); font-size: .6rem; }
+.palette-swatch, .background-preset { box-shadow: 0 0 0 2px #000; }
+
+/* Pixel scrollbars */
+::-webkit-scrollbar { width: 14px; height: 14px; }
+::-webkit-scrollbar-track { background: #000; }
+::-webkit-scrollbar-thumb { background: var(--mc-slot); box-shadow: inset -3px -3px 0 var(--mc-shade), inset 3px 3px 0 var(--mc-light); }
+::selection { background: var(--mc-green); color: #fff; }
+
+@media (max-width: 575.98px) { html { font-size: 13px; } }
