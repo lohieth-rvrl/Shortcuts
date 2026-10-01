@@ -17,6 +17,13 @@ For production, run `npm run build` and then `npm start` with the MongoDB enviro
 
 This app stores one private workspace and requires sign-in (see below).
 
+## Deploy on Render
+
+1. Create a MongoDB Atlas database and allow connections from the Render service's outbound IP addresses.
+2. Push this repository to GitHub, then create a Blueprint in Render using this repository. Render reads `render.yaml` to build and start the app.
+3. Set the prompted `MONGODB_URI`, `AUTH_EMAIL`, and `AUTH_PASSWORD` environment variables in Render. Use a strong, unique app password; Render generates `AUTH_SECRET` for you.
+4. Deploy the Blueprint. The Render service URL serves both the app and its API.
+
 ## Sign-in
 
 Every API route requires a login, and the server checks the password (the browser never sees it).
