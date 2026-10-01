@@ -1,117 +1,110 @@
-import { useEffect, useRef, useState } from 'react';
-import { FilePlus2, FileText, FolderOpen, NotebookPen, Trash2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, Clock, Plus, Search, Trash2 } from 'lucide-react';
+
+// Notepad as a shelf of note cards. Pick one to open it in a focused editor.
+const COVERS = ['#ff453a', '#ff9f0a', '#ffd60a', '#30d158', '#0a84ff', '#bf5af2', '#ff375f'];
+const words = (t) => (t.trim().match(/\S+/g) || []).length;
+const hash = (s) => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
+const coverOf = (n) => n.color || COVERS[hash(n.id) % COVERS.length];
+const ago = (iso) => {
+  const t = Date.parse(iso);
+  if (!t) return 'new';
+  const s = (Date.now() - t) / 1000;
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  return new Date(t).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+};
 
 export default function NotesPage({ notes, activeNoteId, onCreate, onSelect, onUpdate, onDelete }) {
-  const activeNote = notes.find(note => note.id === activeNoteId) || null;
-  const [removingIds, setRemovingIds] = useState(() => new Set());
-  const removalTimers = useRef(new Map());
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const [leaving, setLeaving] = useState(() => new Set());
+  const timers = useRef(new Map());
+  const active = notes.find((n) => n.id === activeNoteId) || null;
+  const desk = open && active;
 
-  useEffect(() => () => {
-    removalTimers.current.forEach(timer => window.clearTimeout(timer));
-  }, []);
+  useEffect(() => { const t = timers.current; return () => t.forEach((id) => clearTimeout(id)); }, []);
+  useEffect(() => {
+    if (!desk) return undefined;
+    const esc = (e) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('keydown', esc);
+    return () => document.removeEventListener('keydown', esc);
+  }, [desk]);
 
-  function removeFile(id) {
-    setRemovingIds(prev => new Set(prev).add(id));
-    const timer = window.setTimeout(() => {
+  const shown = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return [...notes]
+      .filter((n) => !q || `${n.title} ${n.content}`.toLowerCase().includes(q))
+      .sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0));
+  }, [notes, query]);
+
+  function remove(id) {
+    setLeaving((s) => new Set(s).add(id));
+    timers.current.set(id, setTimeout(() => {
       onDelete(id);
-      setRemovingIds(prev => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-      removalTimers.current.delete(id);
-    }, 200);
-    removalTimers.current.set(id, timer);
+      setLeaving((s) => { const x = new Set(s); x.delete(id); return x; });
+      timers.current.delete(id);
+      setOpen(false);
+    }, 280));
+  }
+  function create() { onCreate(); setOpen(true); }
+  function openNote(id) { onSelect(id); setOpen(true); }
+
+  if (desk) {
+    return (
+      <section className="nb-desk" aria-label="Notebook">
+        <div className="nb-bar">
+          <button type="button" className="nb-btn" onClick={() => setOpen(false)}><ArrowLeft size={15} /> All notes</button>
+          <div className="nb-covers" role="group" aria-label="Cover colour">
+            {COVERS.map((c) => (
+              <button key={c} type="button" className={`nb-cover-dot ${c === coverOf(active) ? 'on' : ''}`} style={{ background: c }}
+                aria-label={`Cover ${c}`} onClick={() => onUpdate(active.id, 'color', c)} />
+            ))}
+          </div>
+          <span className="nb-meta"><Clock size={13} /> saved {ago(active.updatedAt)}</span>
+          <span className="nb-meta nb-hide-sm">{words(active.content)} words · {Math.max(1, Math.ceil(words(active.content) / 200))} min read</span>
+          <button type="button" className={`nb-btn nb-danger ${leaving.has(active.id) ? 'is-busy' : ''}`} onClick={() => remove(active.id)} aria-label="Delete this note"><Trash2 size={15} /></button>
+        </div>
+        <div className={`nb-paper ${leaving.has(active.id) ? 'is-leaving' : ''}`} style={{ '--cover': coverOf(active) }}>
+          <input className="nb-title" aria-label="Note name" value={active.title} maxLength={64} placeholder="Untitled note"
+            onChange={(e) => onUpdate(active.id, 'title', e.target.value)} />
+          <textarea className="nb-body" aria-label="Note content" value={active.content} placeholder="Start writing…" autoFocus
+            onChange={(e) => onUpdate(active.id, 'content', e.target.value)} />
+        </div>
+      </section>
+    );
   }
 
   return (
-    <section className="note-manager notes-page">
-      <header className="d-flex flex-wrap align-items-center justify-content-between gap-3 mb-4">
-        <div className="d-flex align-items-center gap-2">
-          <NotebookPen size={16} className="text-success" />
-          <h2 className="h6 fw-semibold mb-0">notepad</h2>
-          <span className="small text-white-50">{notes.length} {notes.length === 1 ? 'note' : 'notes'}</span>
+    <section className="nb-shelf" aria-label="Notes">
+      <header className="nb-head">
+        <div>
+          <h2 className="nb-heading">Notes</h2>
+          <p className="nb-sub">{notes.length} {notes.length === 1 ? 'note' : 'notes'}</p>
         </div>
-        <button
-          type="button"
-          onClick={onCreate}
-          title="Create a note"
-          className="btn btn-sm btn-success d-inline-flex align-items-center gap-2"
-        >
-          <FilePlus2 size={15} />
-          <span>new note</span>
-        </button>
+        <label className="nb-search">
+          <Search size={15} aria-hidden="true" />
+          <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search notes" aria-label="Search notes" />
+        </label>
       </header>
-
-      <div className="row g-3 note-manager-grid">
-        <aside className="col-12 col-md-4 col-lg-3 note-file-list rounded-3 border p-2">
-          <div className="d-flex align-items-center gap-2 mb-2 px-2 py-1 small text-uppercase text-white-50">
-            <FolderOpen size={13} />
-            <span>my notes</span>
-          </div>
-          {notes.length === 0 && <p className="px-2 py-3 small text-white-50">Your notes will appear here.</p>}
-          <div className="d-flex flex-column gap-1 note-file-list-items">
-            {notes.map(note => (
-              <div
-                key={note.id}
-                className={`note-file-row ${note.id === activeNoteId ? 'is-active' : ''} ${removingIds.has(note.id) ? 'is-removing' : ''}`}
-              >
-                <button
-                  type="button"
-                  onClick={() => onSelect(note.id)}
-                  className="btn note-file-select d-flex align-items-center gap-2 text-start"
-                  aria-current={note.id === activeNoteId ? 'page' : undefined}
-                >
-                  <FileText size={14} className="flex-shrink-0 text-success" />
-                  <span className="note-file-name">{note.title || 'Untitled note'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => removeFile(note.id)}
-                  title={`Delete ${note.title || 'untitled note'}`}
-                  aria-label={`Delete ${note.title || 'untitled note'}`}
-                  className="btn btn-sm note-file-delete flex-shrink-0"
-                >
-                  <Trash2 size={13} />
-                </button>
-              </div>
-            ))}
-          </div>
-        </aside>
-
-        <div className="col note-editor rounded-3 border p-3 p-sm-4">
-          {activeNote ? (
-            <>
-              <div className="d-flex align-items-center gap-3 border-bottom pb-3">
-                <FileText size={16} className="flex-shrink-0 text-success" />
-                <input
-                  aria-label="Note name"
-                  value={activeNote.title}
-                  onChange={event => onUpdate(activeNote.id, 'title', event.target.value)}
-                  placeholder="Untitled note"
-                  maxLength={64}
-                  className="form-control note-title-input"
-                />
-                <span className="d-none d-md-inline small text-white-50">autosaved</span>
-              </div>
-              <textarea
-                aria-label="Note content"
-                value={activeNote.content}
-                onChange={event => onUpdate(activeNote.id, 'content', event.target.value)}
-                placeholder="Start writing..."
-                className="form-control typing-field note-content-input mt-3"
-              />
-              <div className="mt-2 text-end small text-white-50">{activeNote.content.length} characters</div>
-            </>
-          ) : (
-            <div className="d-flex flex-column align-items-center justify-content-center text-center note-empty-state">
-              <FolderOpen size={24} className="text-white-50" />
-              <p className="mt-3 mb-1">No note open</p>
-              <p className="small text-white-50">Create a note or choose one from your files.</p>
-            </div>
-          )}
-        </div>
+      <div className="nb-grid">
+        <button type="button" className="nb-card nb-new" onClick={create}>
+          <Plus size={26} aria-hidden="true" /><span>New note</span>
+        </button>
+        {shown.map((n, i) => (
+          <article key={n.id} className={`nb-card ${leaving.has(n.id) ? 'is-leaving' : ''}`} style={{ '--cover': coverOf(n), animationDelay: `${i * 45}ms` }}>
+            <button type="button" className="nb-open" onClick={() => openNote(n.id)} aria-label={`Open ${n.title || 'untitled note'}`}>
+              <span className="nb-spine" aria-hidden="true" />
+              <strong className="nb-card-title">{n.title || 'Untitled note'}</strong>
+              <span className="nb-preview">{n.content.trim() || 'Empty page'}</span>
+              <span className="nb-card-foot"><span>{ago(n.updatedAt)}</span><span>{words(n.content)} words</span></span>
+            </button>
+            <button type="button" className="nb-x" onClick={() => remove(n.id)} aria-label={`Delete ${n.title || 'untitled note'}`}><Trash2 size={13} /></button>
+          </article>
+        ))}
       </div>
+      {notes.length > 0 && shown.length === 0 && <p className="nb-none">No note matches “{query}”.</p>}
     </section>
   );
 }

@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Download, Upload, HelpCircle, Search, Plus, Pencil, X, Pin, Sparkles, NotebookPen, StickyNote, Trash2, ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Link2 } from 'lucide-react';
+import { Download, Upload, HelpCircle, Search, Plus, Pencil, X, Pin, NotebookPen, Link2, LogOut } from 'lucide-react';
 import NotesPage from './NotesPage.jsx';
+import StickyNotesPanel from './StickyBoard.jsx';
+import { useLogo } from './logo.js';
+import DefaultLogo from './DefaultLogo.jsx';
 
-import '../css/style.css';
 
 /* ---------- constants ---------- */
 
@@ -14,30 +16,23 @@ const PALETTE = [
   { name: 'Mint', grad: 'linear-gradient(135deg,#34d399,#14b8a6)' },
   { name: 'Fuchsia', grad: 'linear-gradient(135deg,#d946ef,#ec4899)' },
 ];
-const PINNED_GRAD = 'linear-gradient(135deg,#94a3b8,#71717a)';
 const NOTE_COLORS = ['#fde68a', '#bbf7d0', '#bfdbfe', '#fecdd3'];
 
-const DEFAULT_CATEGORIES = [
-  {
-    id: 'cat_socials', name: 'Socials', color: PALETTE[0].grad, shortcuts: [
-      { id: 'yt', label: 'YouTube', url: 'https://youtube.com', clicks: 0 },
-      { id: 'ig', label: 'Instagram', url: 'https://instagram.com', clicks: 0 },
-      { id: 'x', label: 'X', url: 'https://x.com', clicks: 0 },
-      { id: 'tt', label: 'TikTok', url: 'https://tiktok.com', clicks: 0 },
-    ]
-  },
-  {
-    id: 'cat_work', name: 'Work', color: PALETTE[1].grad, shortcuts: [
-      { id: 'li', label: 'LinkedIn', url: 'https://linkedin.com', clicks: 0 },
-      { id: 'gh', label: 'GitHub', url: 'https://github.com', clicks: 0 },
-    ]
-  }
-];
+const DEFAULT_CATEGORIES = [];
 
-const DEFAULT_PINNED = [
-  { id: 'p_gmail', label: 'Gmail', url: 'https://mail.google.com', clicks: 0 },
-  { id: 'p_drive', label: 'Drive', url: 'https://drive.google.com', clicks: 0 },
-];
+const DEFAULT_PINNED = [];
+
+
+const SEEDED_IDS = new Set(['yt', 'ig', 'x', 'tt', 'li', 'gh', 'p_gmail', 'p_drive']);
+function dropSeededSamples(state) {
+  try { if (localStorage.getItem('samples-removed-v1')) return state; } catch { return state; }
+  const keep = (list) => list.filter((s) => !(SEEDED_IDS.has(s.id) && !s.clicks));
+  const categories = state.categories
+    .map((c) => ({ ...c, shortcuts: keep(c.shortcuts || []) }))
+    .filter((c) => !(['cat_socials', 'cat_work'].includes(c.id) && c.shortcuts.length === 0));
+  try { localStorage.setItem('samples-removed-v1', '1'); } catch { /* ignore */ }
+  return { ...state, categories, pinned: keep(state.pinned || []) };
+}
 
 const DEFAULT_SETTINGS = { background: { type: 'solid', value: '#000000' } };
 
@@ -62,335 +57,69 @@ function guessNameFromUrl(raw) {
   const core = parts.length >= 2 ? parts[parts.length - 2] : parts[0];
   return core.charAt(0).toUpperCase() + core.slice(1);
 }
-const faviconCache = new Map();
-
-function faviconUrls(raw) {
-  try {
-    const site = new URL(normalizeUrl(raw));
-    const directory = new URL(site.href);
-    directory.pathname = site.pathname.endsWith('/') ? site.pathname : `${site.pathname}/`;
-    directory.search = '';
-    directory.hash = '';
-    return [
-      new URL('favicon.ico', directory).href,
-      new URL('/favicon.ico', site.origin).href,
-      `https://www.google.com/s2/favicons?sz=128&domain_url=${encodeURIComponent(site.href)}`,
-      `https://icons.duckduckgo.com/ip3/${site.hostname}.ico`,
-    ];
-  } catch {
-    return [];
-  }
-}
-function resolveFaviconUrls(raw) {
-  const address = normalizeUrl(raw);
-  if (faviconCache.has(address)) return faviconCache.get(address);
-
-  const fallbackUrls = faviconUrls(address);
-  const pending = fetch(`https://api.microlink.io/?url=${encodeURIComponent(address)}`, { signal: AbortSignal.timeout(7000) })
-    .then(response => response.ok ? response.json() : null)
-    .then(result => {
-      const discovered = [result?.data?.logo?.url, result?.data?.favicon?.url]
-        .filter(url => typeof url === 'string' && /^https?:\/\//i.test(url));
-      return [...new Set([...discovered, ...fallbackUrls])];
-    })
-    .catch(() => fallbackUrls);
-
-  faviconCache.set(address, pending);
-  return pending;
-}
-function initialsOf(label) {
-  return ((label || '').trim().charAt(0) || '?').toUpperCase();
-}
-function formatStickyExpiry(value) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'tomorrow';
-  return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-}
 function deepClone(obj) {
   return JSON.parse(JSON.stringify(obj));
 }
 
 /* ---------- small building blocks ---------- */
 
-function Tile({ shortcut, gradient, draggable, controls, onClick, onEdit, onRemove, dragHandlers, isDragging, isDropTarget, isJustDropped, style, className }) {
-  const [imgOk, setImgOk] = useState(true);
-  const [faviconIndex, setFaviconIndex] = useState(0);
-  const [favicons, setFavicons] = useState(() => faviconUrls(shortcut.url));
-  const [ripple, setRipple] = useState(null);
-  const tileRef = useRef(null);
-  const host = hostnameOf(shortcut.url).toLowerCase();
-  const identity = `${shortcut.label} ${host}`.toLowerCase();
-  const brandGlow = identity.includes('youtube') ? '#ff0033'
-    : identity.includes('instagram') ? '#e1306c'
-      : identity.includes('linkedin') ? '#0a66c2'
-        : identity.includes('tiktok') ? '#25f4ee'
-          : identity.includes('twitch') ? '#9146ff'
-            : identity.includes('reddit') ? '#ff4500'
-              : identity.includes('gmail') ? '#ea4335'
-                : identity.includes('github') ? '#d7e4f5'
-                  : '#a78bfa';
-
-  useEffect(() => {
-    let active = true;
-    setFavicons(faviconUrls(shortcut.url));
-    setFaviconIndex(0);
-    setImgOk(true);
-    resolveFaviconUrls(shortcut.url).then(urls => {
-      if (!active) return;
-      setFavicons(urls);
-      setFaviconIndex(0);
-      setImgOk(true);
-    });
-    return () => { active = false; };
-  }, [shortcut.url]);
-
-  function handlePointerMove(event) {
-    if (event.pointerType === 'touch') return;
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const x = (event.clientX - bounds.left) / bounds.width - 0.5;
-    const y = (event.clientY - bounds.top) / bounds.height - 0.5;
-    event.currentTarget.style.setProperty('--tilt-x', `${-y * 12}deg`);
-    event.currentTarget.style.setProperty('--tilt-y', `${x * 12}deg`);
-  }
-
-  function resetTilt(event) {
-    event.currentTarget.style.setProperty('--tilt-x', '0deg');
-    event.currentTarget.style.setProperty('--tilt-y', '0deg');
-  }
-
-  function handleTileClick(event) {
-    const face = tileRef.current?.querySelector('.shortcut-face');
-    if (face) {
-      const bounds = face.getBoundingClientRect();
-      setRipple({
-        id: Date.now(),
-        x: event.clientX ? event.clientX - bounds.left : bounds.width / 2,
-        y: event.clientY ? event.clientY - bounds.top : bounds.height / 2,
-      });
-      window.setTimeout(() => setRipple(null), 540);
-    }
-    onClick?.(event);
-  }
-
+function Tile({ shortcut, draggable, controls, onClick, onEdit, onRemove, dragHandlers, isDragging, isDropTarget, isJustDropped, style, className }) {
+  const [brokenSrc, setBrokenSrc] = useState(null);
+  const logo = useLogo(shortcut.url);
   return (
     <div
-      ref={tileRef}
-      className={`shortcut-tile position-relative ${isDragging ? 'is-dragging' : ''} ${isDropTarget ? 'is-drop-target' : ''} ${isJustDropped ? 'just-dropped' : ''} ${className || ''}`}
-      style={{ ...style, '--tile-glow': brandGlow }}
+      className={`tile ${isDragging ? 'is-dragging' : ''} ${isDropTarget ? 'is-drop-target' : ''} ${isJustDropped ? 'just-dropped' : ''} ${className || ''}`}
+      style={style}
       draggable={draggable}
-      onPointerMove={handlePointerMove}
-      onPointerLeave={resetTilt}
       {...(dragHandlers || {})}
     >
       {controls && (
-        <div className="shortcut-controls position-absolute d-flex justify-content-center gap-1">
-          <button
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onEdit(); }}
-            className="btn btn-sm shortcut-icon-button"
-            title="Edit"
-          >
-            <Pencil size={10} />
-          </button>
-          <button
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRemove(); }}
-            className="btn btn-sm shortcut-icon-button shortcut-remove-button"
-            title="Remove"
-          >
-            <X size={10} />
-          </button>
+        <div className="tile-controls">
+          <button type="button" className="chip" title="Edit" aria-label={`Edit ${shortcut.label}`} onClick={(e) => { e.preventDefault(); e.stopPropagation(); onEdit(); }}><Pencil size={11} /></button>
+          <button type="button" className="chip chip-danger" title="Remove" aria-label={`Remove ${shortcut.label}`} onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRemove(); }}><X size={12} /></button>
         </div>
       )}
-      <a
-        href={shortcut.url}
-        target="_blank"
-        rel="noopener noreferrer"
-        onClick={handleTileClick}
-        className="d-flex flex-column align-items-center gap-2 text-decoration-none"
-        style={{ color: 'inherit' }}
-      >
-        <div
-          className="shortcut-face d-flex align-items-center justify-content-center fw-bold position-relative overflow-hidden"
-          style={{ background: gradient }}
-        >
-          <span>{initialsOf(shortcut.label)}</span>
-          {favicons[faviconIndex] && imgOk && (
-            <div className="position-absolute top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center">
-              <img
-                src={favicons[faviconIndex]}
-                onError={() => {
-                  if (faviconIndex + 1 < favicons.length) setFaviconIndex(faviconIndex + 1);
-                  else setImgOk(false);
-                }}
-                alt=""
-                className="shortcut-favicon object-fit-contain"
-              />
-            </div>
-          )}
-          {ripple && <span key={ripple.id} className="tile-ripple" style={{ left: ripple.x, top: ripple.y }} />}
-        </div>
-        <span className="shortcut-label text-center text-truncate w-100">{shortcut.label}</span>
+      <a href={shortcut.url} target="_blank" rel="noopener noreferrer" onClick={onClick} className="tile-link" draggable={false}>
+        <span className={`tile-face ${logo === undefined ? 'is-loading' : ''}`}>
+          {logo && brokenSrc !== logo
+            ? <img key={logo} src={logo} alt="" draggable={false} referrerPolicy="no-referrer" onError={() => setBrokenSrc(logo)} className="tile-img" />
+            : <DefaultLogo label={shortcut.label} url={shortcut.url} />}
+        </span>
+        <span className="tile-label">{shortcut.label}</span>
       </a>
     </div>
   );
 }
 
-function AddTile({ label, onClick }) {
+function AddTile({ label, onClick, className = '' }) {
   return (
-    <div className="shortcut-add-tile d-flex flex-column align-items-center gap-2" onClick={onClick}>
-      <div className="shortcut-add-face d-flex align-items-center justify-content-center">
-        <Plus size={22} />
-      </div>
-      <span className="shortcut-add-label">{label}</span>
+    <div className={`tile tile-add ${className}`}>
+      <button type="button" className="tile-link" onClick={onClick} aria-label={label}>
+        <span className="tile-face"><Plus size={24} /></span>
+        <span className="tile-label">{label}</span>
+      </button>
     </div>
   );
 }
 
-function ToolbarButton({ icon, title, onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      title={title}
-      className="btn toolbar-button d-flex align-items-center justify-content-center"
-    >
-      {icon}
-    </button>
-  );
+function IconButton({ icon, title, onClick, className = '' }) {
+  return <button type="button" className={`icon-btn ${className}`} title={title} aria-label={title} onClick={onClick}>{icon}</button>;
 }
 
 function ModalShell({ children, onClose, wide }) {
+  useEffect(() => {
+    const esc = (e) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', esc);
+    return () => document.removeEventListener('keydown', esc);
+  }, [onClose]);
   return (
-    <div
-      className="modal-backdrop-custom position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center p-3 anim-fade-in"
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
-    >
-      <div className={`modal-card border p-4 p-md-5 shadow-lg anim-modal-in ${wide ? 'modal-card-wide' : ''}`}>
-        {children}
-      </div>
+    <div className="scrim" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className={`sheet ${wide ? 'sheet-wide' : ''}`} role="dialog" aria-modal="true">{children}</div>
     </div>
   );
 }
 
-function StickyNotesPanel({ stickyNotes, onAddStickyNote, onChangeStickyNote, onDeleteStickyNote, entranceDelay, showHeading = true, compact = false, className = '' }) {
-  const [removingIds, setRemovingIds] = useState(() => new Set());
-  const [activeIndex, setActiveIndex] = useState(0);
-  const removalTimers = useRef(new Map());
-
-  useEffect(() => () => {
-    removalTimers.current.forEach(timer => window.clearTimeout(timer));
-  }, []);
-
-  useEffect(() => {
-    setActiveIndex(index => stickyNotes.length ? index % stickyNotes.length : 0);
-  }, [stickyNotes.length]);
-
-  useEffect(() => {
-    if (stickyNotes.length < 2) return undefined;
-    const interval = window.setInterval(() => {
-      setActiveIndex(index => (index + 1) % stickyNotes.length);
-    }, 6500);
-    return () => window.clearInterval(interval);
-  }, [stickyNotes.length]);
-
-  function removeNote(id) {
-    setRemovingIds(prev => new Set(prev).add(id));
-    const previousTimer = removalTimers.current.get(id);
-    if (previousTimer) window.clearTimeout(previousTimer);
-    const timer = window.setTimeout(() => {
-      onDeleteStickyNote(id);
-      setRemovingIds(prev => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-      removalTimers.current.delete(id);
-    }, 240);
-    removalTimers.current.set(id, timer);
-  }
-
-  function moveSlide(amount) {
-    setActiveIndex(index => (index + amount + stickyNotes.length) % stickyNotes.length);
-  }
-
-  const activeNote = stickyNotes[activeIndex] || null;
-  const previousNote = stickyNotes.length > 1 ? stickyNotes[(activeIndex - 1 + stickyNotes.length) % stickyNotes.length] : null;
-  const nextNote = stickyNotes.length > 1 ? stickyNotes[(activeIndex + 1) % stickyNotes.length] : null;
-
-  return (
-    <aside className={`sticky-notes-rail search-dimmable ${compact ? 'compact-sticky-notes' : ''} ${className}`} style={{ animationDelay: entranceDelay }}>
-      {showHeading && (
-        <div className="d-flex align-items-center justify-content-between border-bottom border-light border-opacity-10 pb-3 mb-3">
-          <div className="d-flex align-items-center gap-2">
-            <StickyNote size={16} className="text-warning" />
-            <h2 className="h6 fw-semibold mb-0">sticky notes</h2>
-            <span className="small text-white-50">{stickyNotes.length}</span>
-          </div>
-          <button
-            type="button"
-            onClick={onAddStickyNote}
-            title="Add sticky note"
-            aria-label="Add sticky note"
-            className="btn btn-sm btn-outline-light square-action"
-          >
-            <Plus size={16} />
-          </button>
-        </div>
-      )}
-
-      {activeNote ? (
-        <div className="sticky-note-deck">
-          {previousNote && <div className="sticky-note-back sticky-note-back-previous" style={{ background: previousNote.color || NOTE_COLORS[0] }} />}
-          {nextNote && <div className="sticky-note-back sticky-note-back-next" style={{ background: nextNote.color || NOTE_COLORS[0] }} />}
-          <article
-            key={activeNote.id}
-            className={`sticky-note rounded-3 p-3 shadow ${removingIds.has(activeNote.id) ? 'is-removing' : ''}`}
-            style={{ background: activeNote.color || NOTE_COLORS[0] }}
-          >
-            <div className="d-flex align-items-center gap-2">
-              <input
-                aria-label="Sticky note title"
-                value={activeNote.title}
-                onChange={(event) => onChangeStickyNote(activeNote.id, 'title', event.target.value)}
-                placeholder="Title"
-                maxLength={60}
-                className="form-control form-control-sm sticky-note-title"
-              />
-              <button
-                type="button"
-                onClick={() => removeNote(activeNote.id)}
-                title="Delete sticky note"
-                aria-label="Delete sticky note"
-                className="btn btn-sm sticky-note-delete"
-              >
-                <Trash2 size={14} />
-              </button>
-            </div>
-            <textarea
-              aria-label="Sticky note text"
-              value={activeNote.text}
-              onChange={(event) => onChangeStickyNote(activeNote.id, 'text', event.target.value)}
-              placeholder="Type a note..."
-              className="form-control typing-field sticky-note-content mt-2"
-            />
-            <footer className="sticky-note-footer d-flex align-items-center justify-content-between mt-3">
-              <span className="small">Expires {formatStickyExpiry(activeNote.expiresAt)}</span>
-              {stickyNotes.length > 1 && <span className="small">{activeIndex + 1} / {stickyNotes.length}</span>}
-            </footer>
-          </article>
-          {stickyNotes.length > 1 && (
-            <div className="sticky-note-navigation d-flex justify-content-center gap-2 mt-3">
-              <button type="button" className="btn btn-sm btn-outline-light" aria-label="Previous sticky note" onClick={() => moveSlide(-1)}><ChevronLeft size={16} /></button>
-              <button type="button" className="btn btn-sm btn-outline-light" aria-label="Next sticky note" onClick={() => moveSlide(1)}><ChevronRight size={16} /></button>
-            </div>
-          )}
-        </div>
-      ) : showHeading ? <p className="py-2 small text-white-50">No sticky notes yet.</p> : null}
-    </aside>
-  );
-}
-
-/* ---------- main app ---------- */
-
-export default function ShortcutsApp() {
+export default function ShortcutsApp({ onSignOut, onUnauthorized }) {
   const [categories, setCategories] = useState([]);
   const [pinned, setPinned] = useState([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
@@ -403,7 +132,6 @@ export default function ShortcutsApp() {
   const [search, setSearch] = useState('');
   const [searchFocused, setSearchFocused] = useState(false);
   const [activePage, setActivePage] = useState(() => window.location.hash === '#notes' ? 'notes' : 'links');
-  const [compactNotesOpen, setCompactNotesOpen] = useState(false);
   const [modal, setModal] = useState(null);
   const [draggingId, setDraggingId] = useState(null);
   const [dropTargetId, setDropTargetId] = useState(null);
@@ -413,15 +141,6 @@ export default function ShortcutsApp() {
   const toastTimer = useRef(null);
   const searchRef = useRef(null);
   const saveQueue = useRef(Promise.resolve());
-
-  useEffect(() => {
-    const breakpoint = window.matchMedia('(max-width: 1023px)');
-    const handleBreakpointChange = (event) => {
-      if (event.matches) setCompactNotesOpen(false);
-    };
-    breakpoint.addEventListener('change', handleBreakpointChange);
-    return () => breakpoint.removeEventListener('change', handleBreakpointChange);
-  }, []);
 
   useEffect(() => {
     const handleRouteChange = () => setActivePage(window.location.hash === '#notes' ? 'notes' : 'links');
@@ -444,6 +163,7 @@ export default function ShortcutsApp() {
     async function loadWorkspace() {
       try {
         const response = await fetch('/api/state');
+        if (response.status === 401) { onUnauthorized?.(); return; }
         if (!response.ok) throw new Error('The workspace could not be loaded.');
         const result = await response.json();
         let state = result.state;
@@ -466,6 +186,7 @@ export default function ShortcutsApp() {
           if (!migration.ok) throw new Error('Existing shortcuts could not be imported into MongoDB.');
         }
 
+        state = dropSeededSamples(state);
         if (cancelled) return;
         setCategories(state.categories);
         setPinned(state.pinned);
@@ -505,6 +226,7 @@ export default function ShortcutsApp() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(state),
         });
+        if (response.status === 401) { onUnauthorized?.(); return; }
         if (!response.ok) throw new Error('Your changes could not be saved to MongoDB.');
       }).catch((error) => {
         setDatabaseError(error.message || 'Could not save to MongoDB.');
@@ -704,6 +426,8 @@ export default function ShortcutsApp() {
       title: '',
       text: '',
       color: NOTE_COLORS[prev.length % NOTE_COLORS.length],
+      rot: Math.round((Math.random() * 9 - 4.5) * 10) / 10,
+      z: prev.reduce((m, n) => Math.max(m, n.z || 0), 0) + 1,
       createdAt: createdAt.toISOString(),
       expiresAt: new Date(createdAt.getTime() + 24 * 60 * 60 * 1000).toISOString(),
     }]);
@@ -780,75 +504,52 @@ export default function ShortcutsApp() {
     return hour < 12 ? 'good morning' : hour < 18 ? 'good afternoon' : 'good evening';
   }
 
+  const today = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  const hello = greeting().replace(/^./, (c) => c.toUpperCase());
+
   if (!loaded) {
-    return (
-      <div className="min-vh-100 d-flex align-items-center justify-content-center text-white-50 small">
-        <span className="anim-pulse-fade">loading your shortcuts…</span>
-      </div>
-    );
+    return <div className="boot" aria-busy="true"><span /></div>;
   }
 
   if (databaseError) {
     return (
-      <div className="min-vh-100 d-flex align-items-center justify-content-center px-3 text-light">
-        <div className="database-error text-center">
-          <h1 className="h4 fw-semibold">MongoDB connection needed</h1>
-          <p className="mt-3 text-white-50">{databaseError} Start MongoDB and configure <code>MONGODB_URI</code> in your local .env file, then reload this page.</p>
-          <button onClick={() => window.location.reload()} className="btn btn-outline-light mt-3">Retry connection</button>
+      <main className="center-screen">
+        <div className="notice">
+          <h1>Can’t reach the database</h1>
+          <p>{databaseError} Check that MongoDB is running and <code>MONGODB_URI</code> is set, then try again.</p>
+          <button type="button" onClick={() => window.location.reload()} className="btn btn-primary">Try again</button>
         </div>
-      </div>
+      </main>
     );
   }
 
-  return (
-    <div className={`app-shell min-vh-100 text-light ${searchFocused ? 'is-searching' : ''}`}>
-      {/* main column */}
-      <div className="container-fluid app-content py-4 py-lg-5 anim-slide-in">
+  const stickyProps = {
+    stickyNotes,
+    onAddStickyNote: addStickyNote,
+    onChangeStickyNote: updateStickyNote,
+    onDeleteStickyNote: (id) => setStickyNotes((prev) => prev.filter((note) => note.id !== id)),
+  };
 
-        <div className="search-dimmable d-flex flex-wrap align-items-start justify-content-between gap-3 mb-4">
-          <div className="anim-enter-down">
-            <div className="small text-white-50 mb-1 d-flex align-items-center gap-2">
-              <Sparkles size={13} className="text-info anim-float-badge" />
-              {greeting()}
-            </div>
-            <h1 className="display-6 fw-bold mb-0">your world, one tap away</h1>
-          </div>
-          <div className="d-flex flex-wrap gap-2 flex-shrink-0">
-            <ToolbarButton icon={<Download size={16} />} title="Export shortcuts" onClick={handleExport} />
-            <ToolbarButton icon={<Upload size={16} />} title="Import shortcuts" onClick={() => importInputRef.current?.click()} />
-            <ToolbarButton icon={<HelpCircle size={16} />} title="Set as homepage" onClick={() => setModal({ type: 'help' })} />
-            <input
-              ref={importInputRef}
-              type="file"
-              accept="application/json"
-              className="d-none"
-              onChange={(e) => { handleImportFile(e.target.files[0]); e.target.value = ''; }}
-            />
+  return (
+    <div className={`app ${searchFocused ? 'is-searching' : ''}`}>
+      <header className="topbar">
+        <div className="topbar-inner">
+          <div className="brand"><span className="brand-mark"><Link2 size={15} strokeWidth={2.4} /></span><span>Shortcuts</span></div>
+          <nav className="segmented" aria-label="Workspace pages">
+            <button type="button" onClick={() => navigateTo('links')} aria-current={activePage === 'links' ? 'page' : undefined} className={activePage === 'links' ? 'active' : ''}><Link2 size={14} />Links</button>
+            <button type="button" onClick={() => navigateTo('notes')} aria-current={activePage === 'notes' ? 'page' : undefined} className={activePage === 'notes' ? 'active' : ''}><NotebookPen size={14} />Notes<span className="seg-count">{notes.length}</span></button>
+          </nav>
+          <div className="topbar-actions">
+            <IconButton className="hide-sm" icon={<Download size={17} />} title="Export shortcuts" onClick={handleExport} />
+            <IconButton className="hide-sm" icon={<Upload size={17} />} title="Import shortcuts" onClick={() => importInputRef.current?.click()} />
+            <IconButton icon={<HelpCircle size={17} />} title="Set as homepage" onClick={() => setModal({ type: 'help' })} />
+            <IconButton icon={<LogOut size={17} />} title="Sign out" onClick={onSignOut} />
+            <input ref={importInputRef} type="file" accept="application/json" hidden onChange={(e) => { handleImportFile(e.target.files[0]); e.target.value = ''; }} />
           </div>
         </div>
+      </header>
 
-        <nav className="page-switcher nav nav-pills gap-1 mb-4" aria-label="Workspace pages">
-          <button
-            type="button"
-            onClick={() => navigateTo('links')}
-            aria-current={activePage === 'links' ? 'page' : undefined}
-            className={`nav-link d-inline-flex align-items-center gap-2 ${activePage === 'links' ? 'active' : ''}`}
-          >
-            <Link2 size={15} />
-            <span>links</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => navigateTo('notes')}
-            aria-current={activePage === 'notes' ? 'page' : undefined}
-            className={`nav-link d-inline-flex align-items-center gap-2 ${activePage === 'notes' ? 'active' : ''}`}
-          >
-            <NotebookPen size={15} />
-            <span>notepad</span>
-            <span className="small text-white-50">{notes.length}</span>
-          </button>
-        </nav>
-
+      <main className="page">
         {activePage === 'notes' ? (
           <NotesPage
             notes={notes}
@@ -857,111 +558,76 @@ export default function ShortcutsApp() {
             onSelect={setActiveNoteId}
             onUpdate={updateNote}
             onDelete={deleteNote}
-            className="notes-page"
           />
         ) : (
           <>
-            <div className="search-shell position-relative mb-4 anim-enter-down" style={{ animationDelay: '90ms' }}>
-              <Search size={16} className="search-icon position-absolute text-white-50" />
-              <input
-                ref={searchRef}
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                onFocus={() => setSearchFocused(true)}
-                onBlur={() => setSearchFocused(false)}
-                onKeyDown={(e) => { if (e.key === 'Enter') runSearch(); }}
-                placeholder="Search Google"
-                className="form-control search-input"
-              />
-              <kbd className="search-hotkey position-absolute">/</kbd>
-            </div>
+            <section className="hero">
+              <p className="eyebrow">{today}</p>
+              <h1>{hello}.</h1>
+              <div className="spotlight">
+                <Search size={19} className="spotlight-icon" aria-hidden="true" />
+                <input
+                  ref={searchRef}
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  onFocus={() => setSearchFocused(true)}
+                  onBlur={() => setSearchFocused(false)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') runSearch(); }}
+                  placeholder="Search Google"
+                  aria-label="Search Google"
+                />
+                <kbd>/</kbd>
+              </div>
+            </section>
 
+            <section className="dock-wrap dimmable" aria-label="Pinned links">
+              <div className="dock">
+                {pinned.map((shortcut, index) => (
+                  <Tile
+                    key={shortcut.id}
+                    shortcut={shortcut}
+                    controls
+                    onClick={() => registerClick(shortcut.id)}
+                    onEdit={() => setModal({ type: 'shortcut', existing: shortcut, forcePinned: true })}
+                    onRemove={() => removeShortcut(shortcut.id)}
+                    style={{ animationDelay: `${index * 45}ms` }}
+                    className="tile-dock"
+                  />
+                ))}
+                <AddTile label="Pin a link" className="tile-dock" onClick={() => setModal({ type: 'shortcut', forcePinned: true })} />
+              </div>
+            </section>
 
-
-            <div className="mb-3 d-flex justify-content-end d-lg-none">
-              <button
-                type="button"
-                onClick={() => setCompactNotesOpen(open => !open)}
-                aria-expanded={compactNotesOpen}
-                className="btn btn-sm btn-outline-light d-inline-flex align-items-center gap-2"
-              >
-                <StickyNote size={14} className="text-warning" />
-                <span>{compactNotesOpen ? 'hide sticky notes' : `show sticky notes (${stickyNotes.length})`}</span>
-                {compactNotesOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-              </button>
-            </div>
-
-            {compactNotesOpen && (
-              <StickyNotesPanel
-                stickyNotes={stickyNotes}
-                side="all"
-                compact
-                onAddStickyNote={addStickyNote}
-                onChangeStickyNote={updateStickyNote}
-                onDeleteStickyNote={(id) => setStickyNotes(prev => prev.filter(note => note.id !== id))}
-                className="mb-4 d-lg-none"
-              />
-            )}
-
-            <div className="row g-4 g-lg-5">
-              <StickyNotesPanel
-                stickyNotes={stickyNotes}
-                side="all"
-                showHeading
-                entranceDelay="220ms"
-                onAddStickyNote={addStickyNote}
-                onChangeStickyNote={updateStickyNote}
-                onDeleteStickyNote={(id) => setStickyNotes(prev => prev.filter(note => note.id !== id))}
-                className="d-none d-lg-block col-lg-6 col-xl-5"
-              />
-
-              <section className="col-12 col-lg-6 col-xl-7 search-dimmable">
-                <div className="search-dimmable mb-4 anim-stagger-in text-center" style={{ animationDelay: '170ms' }}>
-                  <div className="mb-3 d-flex align-items-center justify-content-center gap-2 small text-white-75">
-                    <Pin size={14} className="text-success" />
-                    <h2 className="fw-semibold mb-0">pinned links</h2>
-                  </div>
-                  <div className="d-flex flex-wrap justify-content-center gap-3">
-                    {pinned.map((shortcut, index) => (
-                      <Tile
-                        key={shortcut.id}
-                        shortcut={shortcut}
-                        gradient={PINNED_GRAD}
-                        draggable={false}
-                        controls
-                        onClick={() => registerClick(shortcut.id)}
-                        onEdit={() => setModal({ type: 'shortcut', existing: shortcut, forcePinned: true })}
-                        onRemove={() => removeShortcut(shortcut.id)}
-                        style={{ animationDelay: `${index * 50}ms` }}
-                        className="anim-pop-in"
-                      />
-                    ))}
-                    <AddTile label="pin new" onClick={() => setModal({ type: 'shortcut', forcePinned: true })} />
-                  </div>
-                </div>
-                <div className="d-flex align-items-center justify-content-between mb-2">
-                  <span className="small text-white-50 text-uppercase">your groups</span>
-                  <button
-                    onClick={() => setModal({ type: 'category' })}
-                    className="btn btn-sm btn-outline-light"
-                  >
-                    + new group
-                  </button>
+            <div className="columns">
+              <section className="groups dimmable" aria-label="Groups">
+                <div className="section-head">
+                  <h2>Groups</h2>
+                  <button type="button" onClick={() => setModal({ type: 'category' })} className="btn btn-tint"><Plus size={14} />New group</button>
                 </div>
 
-                <div className="d-flex flex-column gap-4 mt-3">
+                {categories.length === 0 && (
+                  <div className="empty">
+                    <p>No groups yet</p>
+                    <span>Create a group to start collecting links.</span>
+                    <button type="button" className="btn btn-primary" onClick={() => setModal({ type: 'category' })}>Create your first group</button>
+                  </div>
+                )}
+
+                <div className="group-list">
                   {categories.map((cat, categoryIndex) => (
-                    <div key={cat.id} className="group-section anim-stagger-in" style={{ animationDelay: `${220 + categoryIndex * 55}ms` }}>
-                      <div className="d-flex align-items-center gap-2 mb-3">
-                        <span className="category-color-dot rounded-circle" style={{ background: cat.color }} />
-                        <h2 className="h6 fw-semibold text-white-75 mb-0">{cat.name}</h2>
-                        <button onClick={() => setModal({ type: 'category', existing: cat })} className="btn btn-sm btn-link link-light p-0 group-action">edit</button>
-                        <button onClick={() => removeCategory(cat.id)} className="btn btn-sm btn-link link-danger p-0 group-action">delete</button>
-                      </div>
+                    <article key={cat.id} className="group" style={{ animationDelay: `${categoryIndex * 60}ms` }}>
+                      <header className="group-head">
+                        <span className="group-dot" style={{ background: cat.color }} />
+                        <h3>{cat.name}</h3>
+                        <span className="group-count">{cat.shortcuts.length}</span>
+                        <span className="group-actions">
+                          <button type="button" className="text-btn" onClick={() => setModal({ type: 'category', existing: cat })}>Edit</button>
+                          <button type="button" className="text-btn text-btn-danger" onClick={() => removeCategory(cat.id)}>Delete</button>
+                        </span>
+                      </header>
                       <div
-                        className="d-flex flex-wrap gap-3 p-2 shortcut-group-grid"
-                        style={{ minHeight: '92px' }}
+                        className="tiles"
                         onDragOver={(e) => { e.preventDefault(); setDropTargetId(null); }}
                         onDrop={(e) => {
                           e.preventDefault();
@@ -974,7 +640,6 @@ export default function ShortcutsApp() {
                           <Tile
                             key={s.id}
                             shortcut={s}
-                            gradient={cat.color}
                             draggable
                             controls
                             isDragging={draggingId === s.id}
@@ -983,8 +648,7 @@ export default function ShortcutsApp() {
                             onClick={() => registerClick(s.id)}
                             onEdit={() => setModal({ type: 'shortcut', catId: cat.id, existing: s })}
                             onRemove={() => removeShortcut(s.id)}
-                            style={{ animationDelay: `${i * 50}ms` }}
-                            className="anim-pop-in"
+                            style={{ animationDelay: `${i * 40}ms` }}
                             dragHandlers={{
                               onDragStart: () => { dragRef.current = { catId: cat.id, shortcutId: s.id }; setDraggingId(s.id); setDropTargetId(null); },
                               onDragEnd: () => { setDraggingId(null); setDropTargetId(null); },
@@ -998,24 +662,21 @@ export default function ShortcutsApp() {
                             }}
                           />
                         ))}
-                        <AddTile label="add" onClick={() => setModal({ type: 'shortcut', catId: cat.id })} />
+                        <AddTile label="Add" onClick={() => setModal({ type: 'shortcut', catId: cat.id })} />
                       </div>
-                    </div>
+                    </article>
                   ))}
                 </div>
-
-                <p className="text-center small text-white-50 mt-5">drag any shortcut to reorder or move it into another group · press 1–9 to jump to a shortcut</p>
+                <p className="hint">Drag a shortcut to reorder it or move it to another group. Press 1–9 to open one, / to search.</p>
               </section>
+
+              <StickyNotesPanel {...stickyProps} className="rail dimmable" />
             </div>
           </>
         )}
-      </div>
+      </main>
 
-      {toast && (
-        <div className="position-fixed bottom-0 start-50 translate-middle-x mb-4 px-3 py-2 rounded-pill border toast-message small anim-modal-in">
-          {toast}
-        </div>
-      )}
+      {toast && <div className="toast" role="status">{toast}</div>}
 
       {modal?.type === 'shortcut' && (
         <ShortcutModal
@@ -1059,8 +720,7 @@ function ShortcutModal({ modal, categories, onClose, onSave }) {
     setLabel(existing ? existing.label : '');
     setUrl(existing ? existing.url : '');
     setLabelManual(!!existing);
-    const shouldPin = !!modal.forcePinned;
-    setPin(shouldPin);
+    setPin(!!modal.forcePinned);
     setCatId(modal.catId || (categories[0] && categories[0].id) || '');
   }, [modal]);
 
@@ -1079,58 +739,24 @@ function ShortcutModal({ modal, categories, onClose, onSave }) {
 
   return (
     <ModalShell onClose={onClose}>
-      <h2 className="h5 fw-semibold mb-4">{existing ? 'edit shortcut' : 'add a shortcut'}</h2>
-
-      <div className="mb-4">
-        <label className="form-label small text-white-50 mb-1">link</label>
-        <input
-          autoFocus
-          value={url}
-          onChange={(e) => handleUrlChange(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); }}
-          placeholder="e.g. instagram.com/yourname"
-          className="form-control app-form-control"
-        />
-      </div>
-
-      <div className="mb-4">
-        <label className="form-label small text-white-50 mb-1">name</label>
-        <input
-          value={label}
-          onChange={(e) => { setLabel(e.target.value); setLabelManual(true); }}
-          onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); }}
-          maxLength={20}
-          placeholder="e.g. Instagram"
-          className="form-control app-form-control"
-        />
-      </div>
-
-      <div className="form-check d-flex align-items-center gap-2 mb-4">
-        <input type="checkbox" id="pinCheck" checked={pin} onChange={(e) => setPin(e.target.checked)} className="form-check-input mt-0" />
-        <label htmlFor="pinCheck" className="form-check-label small text-white-75 d-flex align-items-center gap-1"><Pin size={12} /> pin to side (always visible, never moves)</label>
-      </div>
-
+      <h2 className="sheet-title">{existing ? 'Edit shortcut' : 'New shortcut'}</h2>
+      <label className="field"><span>Link</span>
+        <input autoFocus value={url} onChange={(e) => handleUrlChange(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); }} placeholder="instagram.com/yourname" className="input" />
+      </label>
+      <label className="field"><span>Name</span>
+        <input value={label} onChange={(e) => { setLabel(e.target.value); setLabelManual(true); }} onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); }} maxLength={20} placeholder="Instagram" className="input" />
+      </label>
+      <label className="check"><input type="checkbox" checked={pin} onChange={(e) => setPin(e.target.checked)} /><span><Pin size={13} /> Pin to the dock</span></label>
       {!pin && (
-        <div className="mb-5">
-          <label className="form-label small text-white-50 mb-1">group</label>
-          <select
-            value={catId}
-            onChange={(e) => setCatId(e.target.value)}
-            className="form-select app-form-control"
-          >
-            {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+        <label className="field"><span>Group</span>
+          <select value={catId} onChange={(e) => setCatId(e.target.value)} className="input">
+            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
-        </div>
+        </label>
       )}
-
-      <div className="d-flex justify-content-end gap-2 mt-3">
-        <button onClick={onClose} className="btn btn-link text-white-50 text-decoration-none">cancel</button>
-        <button
-          onClick={handleSave}
-          className="btn btn-primary"
-        >
-          {existing ? 'save changes' : 'add'}
-        </button>
+      <div className="sheet-actions">
+        <button type="button" onClick={onClose} className="btn">Cancel</button>
+        <button type="button" onClick={handleSave} className="btn btn-primary">{existing ? 'Save' : 'Add'}</button>
       </div>
     </ModalShell>
   );
@@ -1153,36 +779,20 @@ function CategoryModal({ modal, categoriesCount, onClose, onSave }) {
 
   return (
     <ModalShell onClose={onClose}>
-      <h2 className="h5 fw-semibold mb-4">{existing ? 'edit group' : 'name this group'}</h2>
-      <input
-        autoFocus
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); }}
-        maxLength={24}
-        placeholder="e.g. Work, Fun, News"
-        className="form-control app-form-control mb-4"
-      />
-      <label className="form-label small text-white-50 mb-2">color</label>
-      <div className="d-flex flex-wrap gap-2 mb-4">
-        {PALETTE.map(p => (
-          <button
-            key={p.grad}
-            onClick={() => setColor(p.grad)}
-            title={p.name}
-            className="btn palette-swatch"
-            style={{ background: p.grad, outline: color === p.grad ? '2px solid white' : 'none', outlineOffset: '2px' }}
-          />
-        ))}
+      <h2 className="sheet-title">{existing ? 'Edit group' : 'New group'}</h2>
+      <label className="field"><span>Name</span>
+        <input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleSave(); }} maxLength={24} placeholder="Work, Fun, News" className="input" />
+      </label>
+      <div className="field"><span>Colour</span>
+        <div className="swatches">
+          {PALETTE.map((p) => (
+            <button key={p.grad} type="button" onClick={() => setColor(p.grad)} title={p.name} aria-label={p.name} aria-pressed={color === p.grad} className={`swatch ${color === p.grad ? 'on' : ''}`} style={{ background: p.grad }} />
+          ))}
+        </div>
       </div>
-      <div className="d-flex justify-content-end gap-2">
-        <button onClick={onClose} className="btn btn-link text-white-50 text-decoration-none">cancel</button>
-        <button
-          onClick={handleSave}
-          className="btn btn-info text-dark"
-        >
-          {existing ? 'save changes' : 'create'}
-        </button>
+      <div className="sheet-actions">
+        <button type="button" onClick={onClose} className="btn">Cancel</button>
+        <button type="button" onClick={handleSave} className="btn btn-primary">{existing ? 'Save' : 'Create'}</button>
       </div>
     </ModalShell>
   );
@@ -1191,17 +801,15 @@ function CategoryModal({ modal, categoriesCount, onClose, onSave }) {
 function HelpModal({ onClose }) {
   return (
     <ModalShell onClose={onClose} wide>
-      <h2 className="h5 fw-semibold mb-3">set this as your homepage</h2>
-      <div className="text-white-75 help-copy">
-        <p><b className="text-light">Chrome:</b> Settings → On startup → Open a specific page → add this page's location.</p>
-        <p><b className="text-light">Firefox:</b> Settings → Home → Homepage and new windows → Custom URLs → add this page's location.</p>
-        <p><b className="text-light">Edge:</b> Settings → Start, home, and new tabs → add this page's location.</p>
-        <p><b className="text-light">Safari:</b> Settings → General → Homepage → add this page's location.</p>
-        <p className="text-white-50">Tip: host this page somewhere permanent first, then point your browser to that link.</p>
+      <h2 className="sheet-title">Set as your homepage</h2>
+      <div className="help-copy">
+        <p><b>Chrome:</b> Settings → On startup → Open a specific page → add this page’s address.</p>
+        <p><b>Firefox:</b> Settings → Home → Homepage and new windows → Custom URLs.</p>
+        <p><b>Edge:</b> Settings → Start, home, and new tabs → add this page’s address.</p>
+        <p><b>Safari:</b> Settings → General → Homepage → add this page’s address.</p>
+        <p className="muted">Tip: host this page somewhere permanent first, then point your browser to that link.</p>
       </div>
-      <div className="d-flex justify-content-end mt-4">
-        <button onClick={onClose} className="btn btn-link text-white-50 text-decoration-none">got it</button>
-      </div>
+      <div className="sheet-actions"><button type="button" onClick={onClose} className="btn btn-primary">Done</button></div>
     </ModalShell>
   );
 }

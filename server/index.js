@@ -3,6 +3,7 @@ import express from 'express';
 import { MongoClient } from 'mongodb';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { authRouter, requireAuth } from './auth.js';
 
 const rootDir = fileURLToPath(new URL('../', import.meta.url));
 const mongoUri = process.env.MONGODB_URI;
@@ -38,7 +39,11 @@ async function startServer() {
   await noteDocuments.createIndex({ workspaceId: 1, order: 1 });
   const app = express();
 
+  app.set('trust proxy', 1);
+  app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
+  app.use('/api/auth', authRouter);
+  app.use('/api', requireAuth);
 
   app.get('/api/state', async (request, response, next) => {
     try {

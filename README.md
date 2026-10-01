@@ -15,4 +15,13 @@ The first launch imports existing shortcut groups and pinned links from this bro
 
 For production, run `npm run build` and then `npm start` with the MongoDB environment variables configured. The server serves the built app and its API on the configured `PORT` (3001 by default).
 
-This starter stores one shared workspace and does not include authentication. Keep it on a trusted/private network unless authentication is added before public deployment.
+This app stores one private workspace and requires sign-in (see below).
+
+## Sign-in
+
+Every API route requires a login, and the server checks the password (the browser never sees it).
+
+- Default account: `demo@gmail.com` / `demo@123`
+- Change it with `AUTH_EMAIL` and `AUTH_PASSWORD` in `.env`, and in your host's environment variables when you deploy.
+- Optional: set `AUTH_SECRET` to a long random string to sign the login cookie.
+- Sessions last 7 days. After 8 wrong attempts from one address, sign-in is paused for 15 minutes.
