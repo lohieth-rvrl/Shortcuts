@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Clock, Plus, Search, Trash2 } from 'lucide-react';
+import NoteEditor from './NoteEditor.jsx';
+import { toPlain } from './noteBlocks.js';
 
 // Notepad as a shelf of note cards. Pick one to open it in a focused editor.
 const COVERS = ['#ff453a', '#ff9f0a', '#ffd60a', '#30d158', '#0a84ff', '#bf5af2', '#ff375f'];
@@ -35,7 +37,7 @@ export default function NotesPage({ notes, activeNoteId, onCreate, onSelect, onU
   const shown = useMemo(() => {
     const q = query.trim().toLowerCase();
     return [...notes]
-      .filter((n) => !q || `${n.title} ${n.content}`.toLowerCase().includes(q))
+      .filter((n) => !q || `${n.title} ${toPlain(n.content)}`.toLowerCase().includes(q))
       .sort((a, b) => (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0));
   }, [notes, query]);
 
@@ -63,14 +65,13 @@ export default function NotesPage({ notes, activeNoteId, onCreate, onSelect, onU
             ))}
           </div>
           <span className="nb-meta"><Clock size={13} /> saved {ago(active.updatedAt)}</span>
-          <span className="nb-meta nb-hide-sm">{words(active.content)} words · {Math.max(1, Math.ceil(words(active.content) / 200))} min read</span>
+          <span className="nb-meta nb-hide-sm">{words(toPlain(active.content))} words · {Math.max(1, Math.ceil(words(toPlain(active.content)) / 200))} min read</span>
           <button type="button" className={`nb-btn nb-danger ${leaving.has(active.id) ? 'is-busy' : ''}`} onClick={() => remove(active.id)} aria-label="Delete this note"><Trash2 size={15} /></button>
         </div>
         <div className={`nb-paper ${leaving.has(active.id) ? 'is-leaving' : ''}`} style={{ '--cover': coverOf(active) }}>
           <input className="nb-title" aria-label="Note name" value={active.title} maxLength={64} placeholder="Untitled note"
             onChange={(e) => onUpdate(active.id, 'title', e.target.value)} />
-          <textarea className="nb-body" aria-label="Note content" value={active.content} placeholder="Start writing…" autoFocus
-            onChange={(e) => onUpdate(active.id, 'content', e.target.value)} />
+          <NoteEditor key={active.id} content={active.content} onChange={(value) => onUpdate(active.id, 'content', value)} />
         </div>
       </section>
     );
@@ -92,17 +93,20 @@ export default function NotesPage({ notes, activeNoteId, onCreate, onSelect, onU
         <button type="button" className="nb-card nb-new" onClick={create}>
           <Plus size={26} aria-hidden="true" /><span>New note</span>
         </button>
-        {shown.map((n, i) => (
-          <article key={n.id} className={`nb-card ${leaving.has(n.id) ? 'is-leaving' : ''}`} style={{ '--cover': coverOf(n), animationDelay: `${i * 45}ms` }}>
-            <button type="button" className="nb-open" onClick={() => openNote(n.id)} aria-label={`Open ${n.title || 'untitled note'}`}>
-              <span className="nb-spine" aria-hidden="true" />
-              <strong className="nb-card-title">{n.title || 'Untitled note'}</strong>
-              <span className="nb-preview">{n.content.trim() || 'Empty page'}</span>
-              <span className="nb-card-foot"><span>{ago(n.updatedAt)}</span><span>{words(n.content)} words</span></span>
-            </button>
-            <button type="button" className="nb-x" onClick={() => remove(n.id)} aria-label={`Delete ${n.title || 'untitled note'}`}><Trash2 size={13} /></button>
-          </article>
-        ))}
+        {shown.map((n, i) => {
+          const plain = toPlain(n.content);
+          return (
+            <article key={n.id} className={`nb-card ${leaving.has(n.id) ? 'is-leaving' : ''}`} style={{ '--cover': coverOf(n), animationDelay: `${i * 45}ms` }}>
+              <button type="button" className="nb-open" onClick={() => openNote(n.id)} aria-label={`Open ${n.title || 'untitled note'}`}>
+                <span className="nb-spine" aria-hidden="true" />
+                <strong className="nb-card-title">{n.title || 'Untitled note'}</strong>
+                <span className="nb-preview">{plain.trim() || (n.content.trim() ? 'Media note' : 'Empty page')}</span>
+                <span className="nb-card-foot"><span>{ago(n.updatedAt)}</span><span>{words(plain)} words</span></span>
+              </button>
+              <button type="button" className="nb-x" onClick={() => remove(n.id)} aria-label={`Delete ${n.title || 'untitled note'}`}><Trash2 size={13} /></button>
+            </article>
+          );
+        })}
       </div>
       {notes.length > 0 && shown.length === 0 && <p className="nb-none">No note matches “{query}”.</p>}
     </section>

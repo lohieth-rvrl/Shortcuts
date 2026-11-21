@@ -255,13 +255,14 @@ export default function ShortcutsApp({ onSignOut, onUnauthorized }) {
       return undefined;
     }
 
-    const expiryTimes = stickyNotes.map(note => Date.parse(note.expiresAt)).filter(Number.isFinite);
+    const isExpired = (note, now) => note.autoDelete !== false && Date.parse(note.expiresAt) <= now;
+    const expiryTimes = stickyNotes.filter(note => note.autoDelete !== false).map(note => Date.parse(note.expiresAt)).filter(Number.isFinite);
     if (expiryTimes.length === 0) return undefined;
     const timer = window.setTimeout(() => {
       const now = Date.now();
-      const expiredCount = stickyNotes.filter(note => Date.parse(note.expiresAt) <= now).length;
+      const expiredCount = stickyNotes.filter(note => isExpired(note, now)).length;
       if (expiredCount === 0) return;
-      setStickyNotes(prev => prev.filter(note => Date.parse(note.expiresAt) > now));
+      setStickyNotes(prev => prev.filter(note => !isExpired(note, now)));
       showToast(expiredCount === 1 ? 'Sticky note expired' : 'Sticky notes expired');
     }, Math.max(0, Math.min(...expiryTimes) - Date.now()));
     return () => window.clearTimeout(timer);
@@ -428,6 +429,7 @@ export default function ShortcutsApp({ onSignOut, onUnauthorized }) {
       color: NOTE_COLORS[prev.length % NOTE_COLORS.length],
       rot: Math.round((Math.random() * 9 - 4.5) * 10) / 10,
       z: prev.reduce((m, n) => Math.max(m, n.z || 0), 0) + 1,
+      autoDelete: true,
       createdAt: createdAt.toISOString(),
       expiresAt: new Date(createdAt.getTime() + 24 * 60 * 60 * 1000).toISOString(),
     }]);

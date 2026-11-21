@@ -51,6 +51,12 @@ export default function StickyBoard({ stickyNotes, onAddStickyNote, onChangeStic
     onChangeStickyNote(n.id, 'x', Math.max(0, p.x + d[0]));
     onChangeStickyNote(n.id, 'y', Math.max(0, p.y + d[1]));
   }
+  function toggleAuto(n) {
+    const next = n.autoDelete === false;
+    onChangeStickyNote(n.id, 'autoDelete', next);
+    // Turning it back on starts a fresh 24h timer so the note doesn't vanish instantly.
+    if (next) onChangeStickyNote(n.id, 'expiresAt', new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString());
+  }
   function remove(id) {
     setLeaving((s) => new Set(s).add(id));
     timers.current.set(id, setTimeout(() => {
@@ -89,6 +95,12 @@ export default function StickyBoard({ stickyNotes, onAddStickyNote, onChangeStic
                 </div>
                 <input className="note-title" aria-label="Note title" value={n.title} maxLength={40} placeholder="Title" onFocus={() => raise(n)} onChange={(e) => onChangeStickyNote(n.id, 'title', e.target.value)} />
                 <textarea className="note-text" aria-label="Note text" value={n.text} placeholder="Write here…" onFocus={() => raise(n)} onChange={(e) => onChangeStickyNote(n.id, 'text', e.target.value)} />
+                <button type="button" role="switch" aria-checked={n.autoDelete !== false} className={`note-auto ${n.autoDelete !== false ? 'on' : ''}`}
+                  title={n.autoDelete !== false ? `Auto-delete on. Expires ${when(n.expiresAt)}` : 'Auto-delete off. This note stays until you remove it'}
+                  onClick={() => toggleAuto(n)}>
+                  <span className="note-auto-track" aria-hidden="true"><span className="note-auto-knob" /></span>
+                  <span className="note-auto-label">{n.autoDelete !== false ? 'Auto-delete' : 'Keep'}</span>
+                </button>
                 <footer className="note-foot">
                   <span className="note-dots" role="group" aria-label="Note colour">
                     {COLORS.map((c) => <button key={c} type="button" className={`dot ${c === (n.color || COLORS[i % COLORS.length]) ? 'on' : ''}`} style={{ background: c }} aria-label={`Colour ${c}`} onClick={() => onChangeStickyNote(n.id, 'color', c)} />)}

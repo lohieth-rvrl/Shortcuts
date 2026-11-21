@@ -23,7 +23,7 @@ function keepActiveStickyNotes(notes) {
       createdAt: new Date(createdAt).toISOString(),
       expiresAt: new Date(expiresAt).toISOString(),
     };
-  }).filter(note => Date.parse(note.expiresAt) > now);
+  }).filter(note => note.autoDelete === false || Date.parse(note.expiresAt) > now);
 }
 
 async function startServer() {
